@@ -6,9 +6,8 @@ import random
 import asyncio
 from datetime import datetime, timedelta
 from discord.ext import commands
-from openai import OpenAI
 
-client = OpenAI(api_key="OPENAI_TOKEN")
+DISCORD_TOKEN = "DISCORD_TOKEN"
 
 # ---------------- INTENTS ---------------- #
 
@@ -20,6 +19,12 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 log_channel_id = None
+action_cooldowns = {}
+action_totals = {
+    "kiss": {},
+    "hug": {},
+    "slap": {}
+}
 
 # ---------------- DATA ---------------- #
 
@@ -44,6 +49,21 @@ def e(title, desc):
         description=desc,
         color=discord.Color.red()
     )
+
+class RulesView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Accepter le règlement",
+        style=discord.ButtonStyle.success,
+        custom_id="accept_rules_button"
+    )
+    async def accept_rules(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Merci, tu as bien accepté le règlement de Kyoren.",
+            ephemeral=True
+        )
 
 # ---------------- UTILS ---------------- #
 
@@ -76,6 +96,22 @@ def format_remaining(td):
         return f"{hours}h {minutes}m"
     else:
         return f"{minutes}m {seconds}s"
+
+def check_action_cooldown(author_id, target_id, action_name):
+    now = datetime.now()
+    cooldown_key = (author_id, target_id, action_name)
+    expires_at = action_cooldowns.get(cooldown_key)
+
+    if expires_at and expires_at > now:
+        return expires_at - now
+
+    action_cooldowns[cooldown_key] = now + timedelta(hours=2)
+    return None
+
+def increment_action_total(target_id, action_name):
+    user_totals = action_totals.setdefault(action_name, {})
+    user_totals[target_id] = user_totals.get(target_id, 0) + 1
+    return user_totals[target_id]
 
 # ---------------- LOGS ---------------- #
 
@@ -129,6 +165,7 @@ async def add_warn(guild, member, reason):
 
 @bot.event
 async def on_ready():
+    bot.add_view(RulesView())
     print(f"BOT CONNECTÉ : {bot.user}")
 
 @bot.event
@@ -160,7 +197,7 @@ async def on_message(message):
         await message.channel.send("salut à toi, quoi de neuf ?")
 
     if message.content.strip() == "!":
-        await message.channel.send(embed=get_help_embed())
+        await message.channel.send(embed=get_help_embed(message))
         return
 
     await bot.process_commands(message)
@@ -197,6 +234,103 @@ async def ball(ctx, *, question):
     answer = random.choice(responses)
     await ctx.send(answer)
 
+@bot.command()
+async def kiss(ctx, member: discord.Member):
+    remaining = check_action_cooldown(ctx.author.id, member.id, "kiss")
+    if remaining:
+        await ctx.send(
+            f"Tu as deja utilise `!kiss` sur {member.mention}. "
+            f"Reessaie dans {format_remaining(remaining)}."
+        )
+        return
+
+    gifs = [
+        "https://media.giphy.com/media/MQVpBqASxSlFu/giphy.gif",
+        "https://media.giphy.com/media/zkppEMFvRX5FC/giphy.gif",
+        "https://media.giphy.com/media/jR22gdcPiOLaE/giphy.gif",
+        "https://media.giphy.com/media/QGc8RgRvMonFm/giphy.gif",
+        "https://media.giphy.com/media/G3va31oEEnIkM/giphy.gif",
+        "https://media.giphy.com/media/11rWoZNpAKw8w/giphy.gif",
+        "https://media.giphy.com/media/OCQuZxeZ3OKXtG6Ouc/giphy.gif",
+        "https://media.giphy.com/media/2fLX7xDEhleyubyBmv/giphy.gif"
+    ]
+    total_received = increment_action_total(member.id, "kiss")
+
+    embed = discord.Embed(
+        description=(
+            f"❤️ {ctx.author.mention} vous embrasse très fort {member.mention} ! ❤️\n"
+            f"{member.mention} `a reçu {total_received} kiss au total.`"
+        ),
+        color=discord.Color.from_rgb(255, 105, 180)
+    )
+    embed.set_image(url=random.choice(gifs))
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def hug(ctx, member: discord.Member):
+    remaining = check_action_cooldown(ctx.author.id, member.id, "hug")
+    if remaining:
+        await ctx.send(
+            f"Tu as deja utilise `!hug` sur {member.mention}. "
+            f"Reessaie dans {format_remaining(remaining)}."
+        )
+        return
+
+    gifs = [
+        "https://media.giphy.com/media/u9BxQbM5bxvwY/giphy.gif",
+        "https://media.giphy.com/media/qscdhWs5o3yb6/giphy.gif",
+        "https://media.giphy.com/media/49mdjsMrH7oze/giphy.gif",
+        "https://media.giphy.com/media/WynnqxhdFEPYY/giphy.gif",
+        "https://media.giphy.com/media/svXXBgduBsJ1u/giphy.gif",
+        "https://media.giphy.com/media/LIqFOpO9Qh0uA/giphy.gif",
+        "https://media.giphy.com/media/Y8wCpaKI9PUBO/giphy.gif",
+        "https://media.giphy.com/media/BXrwTdoho6hkQ/giphy.gif",
+        "https://media.giphy.com/media/5eyhBKLvYhafu/giphy.gif"
+    ]
+    total_received = increment_action_total(member.id, "hug")
+
+    embed = discord.Embed(
+        description=(
+            f"🫂 {ctx.author.mention} vous sert fort dans ses bras {member.mention} ! 🫂\n"
+            f"{member.mention} `a reçu {total_received} hugs au total.`"
+        ),
+        color=discord.Color.from_rgb(255, 105, 180)
+    )
+    embed.set_image(url=random.choice(gifs))
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def slap(ctx, member: discord.Member):
+    remaining = check_action_cooldown(ctx.author.id, member.id, "slap")
+    if remaining:
+        await ctx.send(
+            f"Tu as deja utilise `!slap` sur {member.mention}. "
+            f"Reessaie dans {format_remaining(remaining)}."
+        )
+        return
+
+    gifs = [
+        "https://media.giphy.com/media/Gf3AUz3eBNbTW/giphy.gif",
+        "https://media.giphy.com/media/xUNd9HZq1itMkiK652/giphy.gif",
+        "https://media.giphy.com/media/m6etefcEsTANa/giphy.gif",
+        "https://media.giphy.com/media/k1uYB5LvlBZqU/giphy.gif",
+        "https://media.giphy.com/media/tX29X2Dx3sAXS/giphy.gif",
+        "https://media.giphy.com/media/6Fad0loHc6Cbe/giphy.gif",
+        "https://media.giphy.com/media/z9e80pvHo1ZF8ew9es/giphy.gif",
+        "https://media.giphy.com/media/AlsIdbTgxX0LC/giphy.gif"
+    ]
+    total_received = increment_action_total(member.id, "slap")
+
+    embed = discord.Embed(
+        description=(
+            f"👋 {ctx.author.mention} vous a collé une claque {member.mention} ! 👋\n"
+            f"{member.mention} `a reçu {total_received} slaps au total.`"
+        ),
+        color=discord.Color.from_rgb(255, 105, 180)
+    )
+    embed.set_image(url=random.choice(gifs))
+    await ctx.send(embed=embed)
+
 # ---------------- LOG CHANNEL ---------------- #
 
 @bot.command()
@@ -220,6 +354,34 @@ async def msg(ctx, *, content):
     await channel.send(message)
     await ctx.send(f"Message envoyé dans {channel.mention}")
 
+@bot.command()
+@is_admin()
+async def rule(ctx):
+    if not ctx.message.channel_mentions:
+        await ctx.send("Mentionne un salon, par exemple `!rule #reglement`.")
+        return
+
+    channel = ctx.message.channel_mentions[0]
+    embed = discord.Embed(
+        title="Règlement de Kyoren 🎐",
+        description=(
+            "Ce présent règlement doit être respecté dans ce serveur sous peine de sanction par le(s) modérateur(rice)(s).\n\n"
+            "**Règle 1**\n"
+            "Règlement du serveur Kyoren #🇵🇸🇨🇩\n\n"
+            "**Respect**\n"
+            "Le respect entre membres est obligatoire. Les insultes, le harcèlement, les menaces ou toute forme de discrimination sont interdits.\n\n"
+            "**Spam et publicité**\n"
+            "Le spam, le flood et la publicité sans autorisation du staff sont interdits.\n\n"
+            "**Contenu**\n"
+            "Les contenus NSFW, violents, choquants ou illégaux sont interdits. Évitez les débats conflictuels (politique, religion…).\n\n"
+            "Pour accéder à l'intégralité du serveur merci de lire le règlement puis d'accepter en cliquant sur le bouton ci-dessous."
+        ),
+        color=discord.Color.from_rgb(255, 105, 180)
+    )
+
+    await channel.send(embed=embed, view=RulesView())
+    await ctx.send(f"Règlement envoyé dans {channel.mention}.")
+
 # ---------------- MODERATION ---------------- #
 
 @bot.command()
@@ -232,8 +394,9 @@ def get_help_embed(ctx):
             "**!ping** → pong\n"
             "**!pp @user** → affiche la photo de profil\n"
             "**!8ball question** → pose une question à la boule magique\n"
-            "**!ask** → je répond à vos questions !\n"
-            "**⚒️MODÉRATION⚒️**\n"
+            "**!kiss @user** → embrasse un membre avec un gif\n"
+            "**!hug @user** → fait un calin à un membre avec un gif\n"
+            "**!slap @user** → colle une claque à un membre avec un gif\n"
             "**!logs @user** → affiche warns et sanctions\n"
             "**!warn @user raison** → ajoute un warn\n"
             "**!ban @user raison** → ban un membre\n"
@@ -248,13 +411,17 @@ def get_help_embed(ctx):
             "**!setlogs** → définit le salon logs\n"
             "**!giveaway** → lance un giveaway interactif\n"
             "**!msg message #salon** → envoie un message dans un salon\n"
-            "**!help** → affiche ce message\n"
+            "**!rule #salon** → envoie le règlement dans un salon\n"
+            "**!help** → affiche ce message"
         )
     else:
         desc = (
             "**!ping** → pong\n"
             "**!pp @user** → affiche la photo de profil\n"
             "**!8ball question** → pose une question à la boule magique\n"
+            "**!kiss @user** → embrasse un membre avec un gif\n"
+            "**!hug @user** → fait un calin à un membre avec un gif\n"
+            "**!slap @user** → colle une claque à un membre avec un gif\n"
             "**!help** → affiche ce message"
         )
     return e("📜 Help", desc)
@@ -304,20 +471,6 @@ async def kick(ctx, member: discord.Member, *, reason="Aucune raison"):
     await member.kick(reason=reason)
     await log(ctx.guild, "👢 Kick", f"{member} | {reason}")
     await ctx.send(embed=e("Kick", f"{member.mention}\n{reason}"))
-
-@bot.command()
-async def ask(ctx, *, question):
-    await ctx.send("🤖 Je réfléchis...")
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "user", "content": question}
-        ]
-    )
-
-    answer = response.choices[0].message.content
-    await ctx.send(answer)
 
 @bot.command()
 @is_admin()
@@ -488,4 +641,7 @@ async def giveaway(ctx):
 
 # ---------------- RUN ---------------- #
 
-bot.run(os.getenv('DISCORD_TOKEN'))
+if not DISCORD_TOKEN:
+    raise ValueError("Le token Discord est vide.")
+
+bot.run(DISCORD_TOKEN)

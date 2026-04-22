@@ -6,6 +6,9 @@ import random
 import asyncio
 from datetime import datetime, timedelta
 from discord.ext import commands
+from openai import OpenAI
+
+client = OpenAI(api_key="OPENAI_TOKEN")
 
 # ---------------- INTENTS ---------------- #
 
@@ -229,6 +232,9 @@ def get_help_embed(ctx):
             "**!ping** → pong\n"
             "**!pp @user** → affiche la photo de profil\n"
             "**!8ball question** → pose une question à la boule magique\n"
+            "**!ask** → je répond à vos questions !"
+
+            "**⚒️MODÉRATION⚒️**"
             "**!logs @user** → affiche warns et sanctions\n"
             "**!warn @user raison** → ajoute un warn\n"
             "**!ban @user raison** → ban un membre\n"
@@ -243,7 +249,7 @@ def get_help_embed(ctx):
             "**!setlogs** → définit le salon logs\n"
             "**!giveaway** → lance un giveaway interactif\n"
             "**!msg message #salon** → envoie un message dans un salon\n"
-            "**!help** → affiche ce message"
+            "**!help** → affiche ce message\n"
         )
     else:
         desc = (
@@ -289,8 +295,6 @@ async def ban(ctx, member: discord.Member, *, reason="Aucune raison"):
     await log(ctx.guild, "⛔ Ban", f"{member} | {reason}")
     await ctx.send(embed=e("Ban", f"{member.mention}\n{reason}"))
 
-
-
 @bot.command()
 @is_admin()
 async def kick(ctx, member: discord.Member, *, reason="Aucune raison"):
@@ -301,6 +305,20 @@ async def kick(ctx, member: discord.Member, *, reason="Aucune raison"):
     await member.kick(reason=reason)
     await log(ctx.guild, "👢 Kick", f"{member} | {reason}")
     await ctx.send(embed=e("Kick", f"{member.mention}\n{reason}"))
+
+@bot.command()
+async def ask(ctx, *, question):
+    await ctx.send("🤖 Je réfléchis...")
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "user", "content": question}
+        ]
+    )
+
+    answer = response.choices[0].message.content
+    await ctx.send(answer)
 
 @bot.command()
 @is_admin()

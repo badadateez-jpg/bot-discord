@@ -232,9 +232,8 @@ def get_help_embed(ctx):
             "**!ping** → pong\n"
             "**!pp @user** → affiche la photo de profil\n"
             "**!8ball question** → pose une question à la boule magique\n"
-            "**!ask** → je répond à vos questions !"
-
-            "**⚒️MODÉRATION⚒️**"
+            "**!ask** → je répond à vos questions !\n"
+            "**⚒️MODÉRATION⚒️**\n"
             "**!logs @user** → affiche warns et sanctions\n"
             "**!warn @user raison** → ajoute un warn\n"
             "**!ban @user raison** → ban un membre\n"

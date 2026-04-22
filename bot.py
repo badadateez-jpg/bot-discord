@@ -7,7 +7,7 @@ import asyncio
 from datetime import datetime, timedelta
 from discord.ext import commands
 
-DISCORD_TOKEN = "DISCORD_TOKEN"
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 # ---------------- INTENTS ---------------- #
 

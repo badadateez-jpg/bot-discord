@@ -503,12 +503,6 @@ YDL_OPTS = {
     "skip_download": True,
     "source_address": "0.0.0.0",
     "ignoreerrors": False,
-
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["mweb"],
-        }
-    },
 }
 
 FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"

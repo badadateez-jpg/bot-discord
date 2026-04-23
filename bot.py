@@ -500,12 +500,18 @@ YDL_OPTS = {
     "no_warnings": True,
     "skip_download": True,
     "source_address": "0.0.0.0",
+
     "cookiefile": "cookies.txt",
+    "ignoreerrors": True,
 
     "extractor_args": {
         "youtube": {
-            "player_client": ["android"]
+            "player_client": ["android", "web"]
         }
+    },
+
+    "http_headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
     }
 }
 

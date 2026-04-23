@@ -5,4 +5,3 @@ davey
 ffmpeg-python
 ffmpeg
 yt-dlp[default]
-bgutil-ytdlp-pot-provider

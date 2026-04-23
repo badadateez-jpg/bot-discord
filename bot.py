@@ -513,6 +513,23 @@ YDL_OPTS = {
     },
 }
 
+# Indique à yt-dlp où trouver node pour résoudre le n challenge
+_node_path = shutil.which("node")
+if _node_path:
+    os.environ["YTDLP_NODE"] = _node_path
+    # Crée un symlink nodejs -> node si absent
+    _nodejs_path = shutil.which("nodejs")
+    if not _nodejs_path:
+        _node_dir = os.path.dirname(_node_path)
+        _symlink = os.path.join(_node_dir, "nodejs")
+        try:
+            if not os.path.exists(_symlink):
+                os.symlink(_node_path, _symlink)
+            os.environ["PATH"] = _node_dir + os.pathsep + os.environ.get("PATH", "")
+            print("Symlink nodejs créé :", _symlink)
+        except Exception as e:
+            print("Symlink nodejs échoué :", e)
+
 FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 FFMPEG_OPTS = "-vn"
 

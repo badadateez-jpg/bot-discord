@@ -493,7 +493,7 @@ class ModerationReasonView(discord.ui.View):
 # ==================================================================== #
 
 YDL_OPTS = {
-    "format": "bestaudio/best",
+    "format": "bestaudio[ext=m4a]/bestaudio/best",
     "noplaylist": True,
     "default_search": "ytsearch",
     "quiet": True,

@@ -1076,4 +1076,4 @@ if not DISCORD_TOKEN:
         "Ajoute une variable d'environnement `DISCORD_TOKEN` avec ton token."
     )
 
-bot.run("DISCORD_TOKEN")
+bot.run(DISCORD_TOKEN)

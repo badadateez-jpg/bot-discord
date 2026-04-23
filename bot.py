@@ -21,6 +21,9 @@ print("CWD =", os.getcwd())
 print("cookies.txt existe ?", os.path.exists("cookies.txt"))
 print("ffmpeg trouvé ?", shutil.which("ffmpeg"))
 
+os.system("which ffmpeg")
+os.system("ffmpeg -version")
+
 # ---------------- LOGGING ---------------- #
 logging.basicConfig(
     level=logging.INFO,

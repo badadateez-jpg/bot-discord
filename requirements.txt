@@ -1,2 +1,2 @@
 discord.py
-openai
+yt-dlp

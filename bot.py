@@ -510,8 +510,7 @@ YDL_OPTS = {
     },
 }
 
-FFMPEG_BEFORE = ("-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
-                 "-nostdin -loglevel warning")
+FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 FFMPEG_OPTS = "-vn"
 
 
@@ -610,12 +609,13 @@ class GuildMusic:
                 try:
                     source = discord.FFmpegPCMAudio(
                         track.stream_url,
+                        executable="ffmpeg",
                         before_options=FFMPEG_BEFORE,
                         options=FFMPEG_OPTS,
                     )
                     self.voice.play(source, after=self._after_play)
                 except Exception as exc:
-                    log.error("Impossible de démarrer la lecture : %s", exc)
+                    log.error("Impossible de démarrer la lecture : %s", exc, exc_info=True)
                     if self.text_channel:
                         try:
                             await self.text_channel.send(

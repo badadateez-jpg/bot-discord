@@ -497,7 +497,7 @@ class ModerationReasonView(discord.ui.View):
 # ==================================================================== #
 
 YDL_OPTS = {
-    "format": "bestaudio/bestvideo/best",
+    "format": "bestaudio/best",
     "noplaylist": True,
     "default_search": "ytsearch",
     "quiet": False,
@@ -506,6 +506,11 @@ YDL_OPTS = {
     "source_address": "0.0.0.0",
     "ignoreerrors": False,
     "noprogress": True,
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["ios", "android"],
+        }
+    },
 }
 
 FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"

@@ -5,6 +5,7 @@ import os
 import random
 import re
 import traceback
+import shutil
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -18,6 +19,7 @@ except ImportError:
 
 print("CWD =", os.getcwd())
 print("cookies.txt existe ?", os.path.exists("cookies.txt"))
+print("ffmpeg trouvé ?", shutil.which("ffmpeg"))
 
 # ---------------- LOGGING ---------------- #
 logging.basicConfig(

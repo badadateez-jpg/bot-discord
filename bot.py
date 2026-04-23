@@ -1791,4 +1791,4 @@ async def on_voice_state_update(member, before, after):
 # ==================================================================== #
 
 if __name__ == "__main__":
-    bot.run("DISCORD_TOKEN")
+    bot.run(DISCORD_TOKEN)

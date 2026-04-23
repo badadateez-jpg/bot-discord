@@ -19,6 +19,8 @@ except ImportError:
 
 print("CWD =", os.getcwd())
 print("cookies.txt existe ?", os.path.exists("cookies.txt"))
+print("cookies.txt chemin absolu =", os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"))
+print("cookies.txt absolu existe ?", os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")))
 print("ffmpeg trouvé ?", shutil.which("ffmpeg"))
 
 os.system("which ffmpeg")
@@ -501,7 +503,7 @@ YDL_OPTS = {
     "skip_download": True,
     "source_address": "0.0.0.0",
     "ignoreerrors": False,
-    "cookiefile": "cookies.txt",
+    "cookiefile": os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"),
 
     "extractor_args": {
         "youtube": {

@@ -493,6 +493,12 @@ YDL_OPTS = {
     "skip_download": True,
     "source_address": "0.0.0.0",
     "cookiefile": "cookies.txt",
+
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["android"]
+        }
+    }
 }
 
 FFMPEG_BEFORE = ("-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "

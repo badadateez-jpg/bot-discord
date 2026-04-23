@@ -541,7 +541,7 @@ async def extract_track(query: str, requester: discord.Member) -> MusicTrack:
 
     def _extract():
         with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
-            info = ydl.extract_info(query, download=False)
+            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
             if info is None:
                 raise RuntimeError("Aucun résultat trouvé.")
             if "entries" in info:

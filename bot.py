@@ -539,21 +539,19 @@ async def extract_track(query: str, requester: discord.Member) -> MusicTrack:
     if yt_dlp is None:
         raise RuntimeError("yt-dlp n'est pas installé. Lance : pip install -U yt-dlp")
 
-with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
-    info = ydl.extract_info(f"ytsearch1:{query}", download=False)
-
-    if "entries" in info and len(info["entries"]) > 0:
-        info = info["entries"][0]
-    else:
-        await ctx.send("❌ Aucun résultat trouvé.")
-        return
-
-    url = info.get("url")
-    title = info.get("title")
-
-    if not url:
-        await ctx.send("❌ Impossible de récupérer l'audio.")
-        return
+    def _extract():
+        with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
+            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+            if info is None:
+                raise ValueError("Aucun résultat trouvé.")
+            if "entries" in info:
+                entries = [e for e in info["entries"] if e is not None]
+                if not entries:
+                    raise ValueError("Aucun résultat trouvé.")
+                info = entries[0]
+            if not info.get("url"):
+                raise ValueError("Impossible de récupérer l'URL audio.")
+            return info
 
     info = await asyncio.to_thread(_extract)
     return MusicTrack(

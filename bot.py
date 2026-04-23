@@ -493,26 +493,21 @@ class ModerationReasonView(discord.ui.View):
 # ==================================================================== #
 
 YDL_OPTS = {
-    "format": "bestaudio[ext=m4a]/bestaudio/best",
+    "format": "bestaudio/best",
     "noplaylist": True,
-    "default_search": "ytsearch1",
-    "quiet": True,
-    "no_warnings": True,
+    "default_search": "ytsearch",
+    "quiet": False,
+    "no_warnings": False,
     "skip_download": True,
     "source_address": "0.0.0.0",
-
+    "ignoreerrors": False,
     "cookiefile": "cookies.txt",
-    "ignoreerrors": True,
 
     "extractor_args": {
         "youtube": {
-            "player_client": ["android", "web"]
+            "player_client": ["ios", "android", "web"]
         }
     },
-
-    "http_headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-    }
 }
 
 FFMPEG_BEFORE = ("-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
@@ -541,7 +536,7 @@ async def extract_track(query: str, requester: discord.Member) -> MusicTrack:
 
     def _extract():
         with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
-            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+            info = ydl.extract_info(query, download=False)
             if info is None:
                 raise ValueError("Aucun résultat trouvé.")
             if "entries" in info:

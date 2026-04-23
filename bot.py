@@ -16,6 +16,9 @@ try:
 except ImportError:
     yt_dlp = None
 
+print("CWD =", os.getcwd())
+print("cookies.txt existe ?", os.path.exists("cookies.txt"))
+
 # ---------------- LOGGING ---------------- #
 logging.basicConfig(
     level=logging.INFO,

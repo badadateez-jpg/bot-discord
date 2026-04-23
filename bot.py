@@ -503,7 +503,6 @@ YDL_OPTS = {
     "skip_download": True,
     "source_address": "0.0.0.0",
     "ignoreerrors": False,
-    "cookiefile": os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"),
 
     "extractor_args": {
         "youtube": {
@@ -536,7 +535,16 @@ async def extract_track(query: str, requester: discord.Member) -> MusicTrack:
         raise RuntimeError("yt-dlp n'est pas installé. Lance : pip install -U yt-dlp")
 
     def _extract():
-        with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
+        cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+        opts = dict(YDL_OPTS)
+        if os.path.exists(cookie_path):
+            opts["cookiefile"] = cookie_path
+            log.info("Utilisation du cookiefile : %s", cookie_path)
+        else:
+            log.warning("cookies.txt introuvable à : %s", cookie_path)
+            opts.pop("cookiefile", None)
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(query, download=False)
             if info is None:
                 raise ValueError("Aucun résultat trouvé.")

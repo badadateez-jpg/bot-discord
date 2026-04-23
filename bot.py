@@ -22,6 +22,8 @@ print("cookies.txt existe ?", os.path.exists("cookies.txt"))
 print("cookies.txt chemin absolu =", os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"))
 print("cookies.txt absolu existe ?", os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")))
 print("ffmpeg trouvé ?", shutil.which("ffmpeg"))
+print("node trouvé ?", shutil.which("node"))
+print("nodejs trouvé ?", shutil.which("nodejs"))
 
 os.system("which ffmpeg")
 os.system("ffmpeg -version")
@@ -495,7 +497,7 @@ class ModerationReasonView(discord.ui.View):
 # ==================================================================== #
 
 YDL_OPTS = {
-    "format": "bestaudio/best",
+    "format": "bestaudio/bestvideo/best",
     "noplaylist": True,
     "default_search": "ytsearch",
     "quiet": False,
@@ -503,6 +505,7 @@ YDL_OPTS = {
     "skip_download": True,
     "source_address": "0.0.0.0",
     "ignoreerrors": False,
+    "noprogress": True,
 }
 
 FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"

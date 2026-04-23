@@ -507,7 +507,8 @@ YDL_OPTS = {
 
     "extractor_args": {
         "youtube": {
-            "player_client": ["ios", "android", "web"]
+            "player_client": ["mweb", "ios"],
+            "player_skip": ["webpage", "configs"],
         }
     },
 }

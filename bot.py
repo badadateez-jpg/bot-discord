@@ -508,7 +508,7 @@ YDL_OPTS = {
     "noprogress": True,
     "extractor_args": {
         "youtube": {
-            "player_client": ["ios", "android"],
+            "player_client": ["tv", "web"],
         }
     },
 }

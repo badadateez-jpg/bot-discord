@@ -28,13 +28,18 @@ print("nodejs trouvé ?", shutil.which("nodejs"))
 os.system("which ffmpeg")
 os.system("ffmpeg -version")
 
+# Debug : chercher libopus
+os.system("find /nix/store -name 'libopus.so*' 2>/dev/null | head -5")
+os.system("ldconfig -p | grep opus || echo 'ldconfig non disponible'")
+
 # Chargement opus au démarrage
 for _opus_name in ("libopus.so.0", "libopus.so", "libopus", "opus"):
     try:
         discord.opus.load_opus(_opus_name)
         print(f"Opus chargé : {_opus_name}")
         break
-    except Exception:
+    except Exception as e:
+        print(f"Échec {_opus_name}: {e}")
         continue
 else:
     print("AVERTISSEMENT : libopus introuvable, la musique ne fonctionnera pas")

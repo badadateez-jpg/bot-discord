@@ -28,6 +28,17 @@ print("nodejs trouvé ?", shutil.which("nodejs"))
 os.system("which ffmpeg")
 os.system("ffmpeg -version")
 
+# Chargement opus au démarrage
+for _opus_name in ("libopus.so.0", "libopus.so", "libopus", "opus"):
+    try:
+        discord.opus.load_opus(_opus_name)
+        print(f"Opus chargé : {_opus_name}")
+        break
+    except Exception:
+        continue
+else:
+    print("AVERTISSEMENT : libopus introuvable, la musique ne fonctionnera pas")
+
 # ---------------- LOGGING ---------------- #
 logging.basicConfig(
     level=logging.INFO,
@@ -734,6 +745,16 @@ async def ensure_voice(ctx: commands.Context) -> Optional[GuildMusic]:
 @bot.event
 async def on_ready():
     log.info("BOT CONNECTÉ : %s (id=%s)", bot.user, bot.user.id)
+    if not discord.opus.is_loaded():
+        try:
+            discord.opus.load_opus("libopus.so.0")
+            log.info("Opus chargé : libopus.so.0")
+        except Exception:
+            try:
+                discord.opus.load_opus("libopus")
+                log.info("Opus chargé : libopus")
+            except Exception as e:
+                log.error("Impossible de charger opus : %s", e)
     # Ré-enregistre la view persistante des règlements (sans connaître les role_ids précis,
     # Discord ré-appelle le callback sur n'importe quel button avec ce custom_id ; on ignore.)
 

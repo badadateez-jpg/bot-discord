@@ -619,6 +619,8 @@ class GuildMusic:
         self.text_channel: Optional[discord.abc.Messageable] = None
         self.next_event = asyncio.Event()
         self.player_task: Optional[asyncio.Task] = None
+        self.loop_mode = False  # True = loop la chanson actuelle
+        self.start_time: Optional[datetime] = None  # Timestamp de début de lecture
 
     def enqueue(self, track: MusicTrack):
         self.queue.append(track)
@@ -651,9 +653,11 @@ class GuildMusic:
 
                 track = self.queue.pop(0)
                 self.current = track
+                self.start_time = datetime.now(timezone.utc)
 
                 if self.voice is None or not self.voice.is_connected():
                     self.current = None
+                    self.start_time = None
                     return
 
                 try:
@@ -674,6 +678,7 @@ class GuildMusic:
                         except Exception:
                             pass
                     self.current = None
+                    self.start_time = None
                     continue
 
                 if self.text_channel:
@@ -689,7 +694,13 @@ class GuildMusic:
                         pass
 
                 await self.next_event.wait()
+                
+                # Si loop activé, remet la chanson dans la queue
+                if self.loop_mode and self.current:
+                    self.queue.insert(0, self.current)
+                
                 self.current = None
+                self.start_time = None
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1081,8 +1092,11 @@ def get_help_embed(author: discord.Member) -> discord.Embed:
             "**!pause** → met la musique en pause\n"
             "**!resume** → reprend la lecture\n"
             "**!skip** → passe à la musique suivante\n"
-            "**!queue** → affiche la file d'attente\n"
-            "**!nowplaying** → affiche ce qui joue actuellement\n"
+            "**!queue** → affiche la file d'attente (menu interactif)\n"
+            "**!nowplaying** → affiche ce qui joue avec barre de progression\n"
+            "**!loop** → active/désactive la répétition de la chanson\n"
+            "**!shuffle** → mélange la file d'attente\n"
+            "**!remove <position>** → retire une musique de la file\n"
             "**!stop** → arrête tout et vide la file\n"
             "**!leave** → déconnecte le bot du vocal"
         ),
@@ -1779,8 +1793,9 @@ async def queue_cmd(ctx):
     lines = []
     if state.current:
         dur = format_secs(state.current.duration) if state.current.duration else "?:??"
+        loop_indicator = " 🔁" if state.loop_mode else ""
         lines.append(
-            f"**En lecture :** [{state.current.title}]({state.current.webpage_url}) "
+            f"**En lecture{loop_indicator} :** [{state.current.title}]({state.current.webpage_url}) "
             f"— `{dur}` — {state.current.requester_mention}"
         )
     if state.queue:
@@ -1798,7 +1813,77 @@ async def queue_cmd(ctx):
             lines.append(f"Durée totale approximative : `{format_secs(total)}`")
 
     embed = embed_ok("🎵 File d'attente", "\n".join(lines)[:4000])
-    await ctx.send(embed=embed)
+    
+    # Ajoute un menu de sélection si la queue n'est pas vide
+    view = None
+    if state.queue:
+        view = QueueSelectView(state, ctx.author)
+    
+    await ctx.send(embed=embed, view=view)
+
+
+class QueueSelectView(discord.ui.View):
+    """Menu interactif pour sauter à une musique spécifique dans la queue."""
+    
+    def __init__(self, music_state: GuildMusic, requester: discord.Member):
+        super().__init__(timeout=60)
+        self.music_state = music_state
+        self.requester = requester
+        
+        # Crée les options du select (max 25)
+        options = []
+        for i, track in enumerate(music_state.queue[:25], start=1):
+            title = track.title[:90] if len(track.title) > 90 else track.title
+            dur = format_secs(track.duration) if track.duration else "?:??"
+            options.append(
+                discord.SelectOption(
+                    label=f"{i}. {title}",
+                    description=f"Durée: {dur}",
+                    value=str(i)
+                )
+            )
+        
+        select = discord.ui.Select(
+            placeholder="Choisir une musique à jouer...",
+            options=options,
+            custom_id="queue_select"
+        )
+        select.callback = self.select_callback
+        self.add_item(select)
+    
+    async def select_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.requester.id:
+            await interaction.response.send_message(
+                "Seul l'auteur de la commande peut utiliser ce menu.",
+                ephemeral=True
+            )
+            return
+        
+        position = int(interaction.data["values"][0])
+        
+        # Déplace la musique sélectionnée en première position
+        if position > len(self.music_state.queue):
+            await interaction.response.send_message("Cette musique n'existe plus dans la file.", ephemeral=True)
+            return
+        
+        selected_track = self.music_state.queue.pop(position - 1)
+        self.music_state.queue.insert(0, selected_track)
+        
+        # Skip la musique actuelle pour jouer la sélectionnée
+        if self.music_state.voice and (self.music_state.voice.is_playing() or self.music_state.voice.is_paused()):
+            self.music_state.voice.stop()
+        
+        await interaction.response.send_message(
+            embed=embed_ok("⏭ Saut vers", f"**{selected_track.title}** va être joué."),
+            ephemeral=False
+        )
+        self.stop()
+    
+    async def on_timeout(self):
+        # Désactive le menu après timeout
+        for item in self.children:
+            item.disabled = True
+
 
 
 @bot.command(name="nowplaying", aliases=["np"])
@@ -1807,12 +1892,29 @@ async def nowplaying(ctx):
     if not state or state.current is None:
         await ctx.send(embed=embed_err("Musique", "Rien en lecture."))
         return
+    
     t = state.current
     dur = format_secs(t.duration) if t.duration else "?:??"
+    
+    # Calcul de la progression
+    progress_bar = ""
+    if t.duration and state.start_time:
+        elapsed = (datetime.now(timezone.utc) - state.start_time).total_seconds()
+        elapsed = min(elapsed, t.duration)
+        percent = elapsed / t.duration
+        bar_length = 20
+        filled = int(bar_length * percent)
+        bar = "▬" * filled + "🔘" + "▬" * (bar_length - filled - 1)
+        elapsed_str = format_secs(int(elapsed))
+        progress_bar = f"\n`{elapsed_str}` {bar} `{dur}`"
+    
+    loop_indicator = " 🔁" if state.loop_mode else ""
+    
     await ctx.send(embed=embed_ok(
-        "🎵 En lecture",
+        f"🎵 En lecture{loop_indicator}",
         f"**[{t.title}]({t.webpage_url})**\n"
-        f"Durée : `{dur}` — Demandé par {t.requester_mention}",
+        f"Durée : `{dur}` — Demandé par {t.requester_mention}"
+        f"{progress_bar}",
     ))
 
 
@@ -1836,6 +1938,44 @@ async def leave(ctx):
         return
     await state.disconnect()
     await ctx.send(embed=embed_ok("👋 Leave", "Déconnecté du vocal."))
+
+
+@bot.command()
+async def loop(ctx):
+    """Active/désactive le mode loop (répète la chanson actuelle)."""
+    state = _music_state.get(ctx.guild.id)
+    if not state:
+        await ctx.send(embed=embed_err("Musique", "Aucune session musicale active."))
+        return
+    state.loop_mode = not state.loop_mode
+    status = "activé ✅" if state.loop_mode else "désactivé ❌"
+    await ctx.send(embed=embed_ok("🔁 Loop", f"Mode loop {status}"))
+
+
+@bot.command()
+async def shuffle(ctx):
+    """Mélange la file d'attente."""
+    state = _music_state.get(ctx.guild.id)
+    if not state or not state.queue:
+        await ctx.send(embed=embed_err("Musique", "La file est vide."))
+        return
+    random.shuffle(state.queue)
+    await ctx.send(embed=embed_ok("🔀 Shuffle", f"File mélangée ({len(state.queue)} musiques)."))
+
+
+@bot.command()
+async def remove(ctx, position: int):
+    """Retire une musique de la file par sa position (1 = première)."""
+    state = _music_state.get(ctx.guild.id)
+    if not state or not state.queue:
+        await ctx.send(embed=embed_err("Musique", "La file est vide."))
+        return
+    if position < 1 or position > len(state.queue):
+        await ctx.send(embed=embed_err("Musique", f"Position invalide. La file contient {len(state.queue)} musiques."))
+        return
+    removed = state.queue.pop(position - 1)
+    await ctx.send(embed=embed_ok("🗑 Retiré", f"**{removed.title}** retiré de la file."))
+
 
 
 @bot.event

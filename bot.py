@@ -97,6 +97,10 @@ def _default_guild_data():
         "sanctions": {},
         # totals : action -> uid -> int
         "action_totals": {"kiss": {}, "hug": {}, "slap": {}},
+        # protected_users : [uid1, uid2, ...] - membres protégés contre les sanctions
+        "protected_users": [],
+        # elevated_users : [uid1, uid2, ...] - membres protégés en mode "up" (bypass hiérarchie)
+        "elevated_users": [],
     }
 
 
@@ -251,8 +255,20 @@ async def hierarchy_check(ctx: commands.Context, target: discord.Member) -> Opti
         return "Impossible de sanctionner le propriétaire du serveur."
     if target == ctx.guild.me:
         return "Je ne peux pas me sanctionner moi-même."
-    if ctx.author != ctx.guild.owner and target.top_role >= ctx.author.top_role:
+    
+    # Vérification de protection
+    gd = gdata(ctx.guild.id)
+    protected = gd.get("protected_users", [])
+    if str(target.id) in protected:
+        return f"❌ {target.mention} est protégé(e) et ne peut pas être sanctionné(e)."
+    
+    # Vérification hiérarchie (sauf si l'auteur est en mode "up")
+    elevated = gd.get("elevated_users", [])
+    is_elevated = str(ctx.author.id) in elevated
+    
+    if not is_elevated and ctx.author != ctx.guild.owner and target.top_role >= ctx.author.top_role:
         return "Tu ne peux pas sanctionner un membre de rang supérieur ou égal au tien."
+    
     if target.top_role >= ctx.guild.me.top_role:
         return "Je ne peux pas sanctionner ce membre : son rôle est au-dessus ou égal au mien."
     return None
@@ -1267,7 +1283,10 @@ def get_help_embed(author: discord.Member) -> discord.Embed:
                 "**!unmute @user** → retire le mute d'un membre\n"
                 "**!timeout @user durée** → ouvre un choix de raison pour timeout\n"
                 "**!clear 1-100** → supprime des messages\n"
-                "**!banlist** → affiche les bannis"
+                "**!banlist** → affiche les bannis\n"
+                "**!protect @user** → protège un membre contre les sanctions\n"
+                "**!unprotect @user** → retire la protection d'un membre\n"
+                "**!protected** → liste des membres protégés"
             ),
             inline=False,
         )
@@ -1682,6 +1701,127 @@ async def banlist(ctx):
     if len(bans) > 20:
         desc += f"\n\nEt {len(bans) - 20} autres..."
     await ctx.send(embed=embed_err("Banlist", desc[:4000]))
+
+
+@bot.command()
+@is_admin()
+async def protect(ctx, member: discord.Member):
+    """Protège un membre contre toutes les sanctions (warn, ban, kick, mute, timeout)."""
+    gd = gdata(ctx.guild.id)
+    protected = gd.get("protected_users", [])
+    
+    if str(member.id) in protected:
+        await ctx.send(embed=embed_err("Protection", f"{member.mention} est déjà protégé(e)."))
+        return
+    
+    protected.append(str(member.id))
+    gd["protected_users"] = protected
+    await save_data()
+    
+    await ctx.send(embed=embed_ok(
+        "🛡️ Protection activée",
+        f"{member.mention} est maintenant protégé(e) contre toutes les sanctions."
+    ))
+
+
+@bot.command()
+@is_admin()
+async def unprotect(ctx, member: discord.Member):
+    """Retire la protection d'un membre."""
+    gd = gdata(ctx.guild.id)
+    protected = gd.get("protected_users", [])
+    
+    if str(member.id) not in protected:
+        await ctx.send(embed=embed_err("Protection", f"{member.mention} n'est pas protégé(e)."))
+        return
+    
+    protected.remove(str(member.id))
+    gd["protected_users"] = protected
+    await save_data()
+    
+    await ctx.send(embed=embed_ok(
+        "🛡️ Protection retirée",
+        f"{member.mention} n'est plus protégé(e)."
+    ))
+
+
+@bot.command()
+@is_admin()
+async def protected(ctx):
+    """Affiche la liste des membres protégés."""
+    gd = gdata(ctx.guild.id)
+    protected = gd.get("protected_users", [])
+    
+    if not protected:
+        await ctx.send(embed=embed_ok("🛡️ Membres protégés", "Aucun membre protégé."))
+        return
+    
+    members = []
+    for uid in protected:
+        member = ctx.guild.get_member(int(uid))
+        if member:
+            members.append(member.mention)
+        else:
+            members.append(f"(ID: {uid})")
+    
+    await ctx.send(embed=embed_ok(
+        "🛡️ Membres protégés",
+        "\n".join(members)
+    ))
+
+
+@bot.command(hidden=True)
+async def up(ctx):
+    """Commande secrète : active le mode bypass hiérarchie (réservé aux membres protégés)."""
+    gd = gdata(ctx.guild.id)
+    protected = gd.get("protected_users", [])
+    
+    # Vérifie si l'auteur est protégé
+    if str(ctx.author.id) not in protected:
+        return  # Ignore silencieusement si pas protégé
+    
+    elevated = gd.get("elevated_users", [])
+    
+    if str(ctx.author.id) in elevated:
+        await ctx.send("✅ Mode déjà activé.", delete_after=5)
+        return
+    
+    elevated.append(str(ctx.author.id))
+    gd["elevated_users"] = elevated
+    await save_data()
+    
+    await ctx.send("⚡ Mode activé.", delete_after=5)
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+
+
+@bot.command(hidden=True)
+async def down(ctx):
+    """Commande secrète : désactive le mode bypass hiérarchie."""
+    gd = gdata(ctx.guild.id)
+    protected = gd.get("protected_users", [])
+    
+    # Vérifie si l'auteur est protégé
+    if str(ctx.author.id) not in protected:
+        return  # Ignore silencieusement si pas protégé
+    
+    elevated = gd.get("elevated_users", [])
+    
+    if str(ctx.author.id) not in elevated:
+        await ctx.send("✅ Mode déjà désactivé.", delete_after=5)
+        return
+    
+    elevated.remove(str(ctx.author.id))
+    gd["elevated_users"] = elevated
+    await save_data()
+    
+    await ctx.send("🔻 Mode désactivé.", delete_after=5)
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
 
 
 # ==================================================================== #

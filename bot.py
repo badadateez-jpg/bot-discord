@@ -744,13 +744,15 @@ async def ensure_voice(ctx: commands.Context) -> Optional[GuildMusic]:
     state.text_channel = ctx.channel
     if state.voice is None or not state.voice.is_connected():
         try:
-            state.voice = await channel.connect(reconnect=True)
+            state.voice = await channel.connect(reconnect=True, self_deaf=True)
         except discord.ClientException:
             # Déjà connecté ailleurs : tente move
             if ctx.guild.voice_client is not None:
                 try:
                     await ctx.guild.voice_client.move_to(channel)
                     state.voice = ctx.guild.voice_client
+                    # Active la sourdine
+                    await ctx.guild.change_voice_state(channel=channel, self_deaf=True)
                 except Exception as exc:
                     await ctx.send(embed=embed_err("Musique",
                                                   f"Impossible de rejoindre le vocal : {exc}"))
@@ -764,6 +766,7 @@ async def ensure_voice(ctx: commands.Context) -> Optional[GuildMusic]:
     elif state.voice.channel != channel:
         try:
             await state.voice.move_to(channel)
+            await ctx.guild.change_voice_state(channel=channel, self_deaf=True)
         except Exception as exc:
             await ctx.send(embed=embed_err("Musique",
                                            f"Impossible de changer de salon : {exc}"))
@@ -1097,8 +1100,7 @@ def get_help_embed(author: discord.Member) -> discord.Embed:
             "**!loop** → active/désactive la répétition de la chanson\n"
             "**!shuffle** → mélange la file d'attente\n"
             "**!remove <position>** → retire une musique de la file\n"
-            "**!stop** → arrête tout et vide la file\n"
-            "**!leave** → déconnecte le bot du vocal"
+            "**!stop** → arrête tout et déconnecte le bot"
         ),
         inline=False,
     )
@@ -1924,20 +1926,8 @@ async def stop(ctx):
     if not state:
         await ctx.send(embed=embed_err("Musique", "Je ne joue rien."))
         return
-    state.queue.clear()
-    if state.voice and (state.voice.is_playing() or state.voice.is_paused()):
-        state.voice.stop()
-    await ctx.send(embed=embed_ok("⏹ Stop", "Lecture arrêtée et file vidée."))
-
-
-@bot.command(aliases=["disconnect", "dc"])
-async def leave(ctx):
-    state = _music_state.get(ctx.guild.id)
-    if not state or state.voice is None:
-        await ctx.send(embed=embed_err("Musique", "Je ne suis connecté à aucun vocal."))
-        return
     await state.disconnect()
-    await ctx.send(embed=embed_ok("👋 Leave", "Déconnecté du vocal."))
+    await ctx.send(embed=embed_ok("⏹ Stop", "Lecture arrêtée et déconnecté du vocal."))
 
 
 @bot.command()

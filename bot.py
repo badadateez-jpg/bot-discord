@@ -830,6 +830,152 @@ async def on_message_delete(message: discord.Message):
     )
 
 
+@bot.event
+async def on_message_edit(before: discord.Message, after: discord.Message):
+    """Log les modifications de messages."""
+    if before.guild is None or before.author.bot:
+        return
+    if before.content == after.content:
+        return
+    
+    before_content = before.content or "(pas de contenu)"
+    after_content = after.content or "(pas de contenu)"
+    
+    if len(before_content) > 1000:
+        before_content = before_content[:1000] + "…"
+    if len(after_content) > 1000:
+        after_content = after_content[:1000] + "…"
+    
+    await guild_log(
+        before.guild, "✏️ Message modifié",
+        f"Auteur : {before.author}\n"
+        f"Salon : {before.channel.mention}\n"
+        f"**Avant :** {before_content}\n"
+        f"**Après :** {after_content}",
+    )
+
+
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    """Log les changements de rôles et de pseudo."""
+    if before.roles != after.roles:
+        added = [r for r in after.roles if r not in before.roles]
+        removed = [r for r in before.roles if r not in after.roles]
+        
+        if added:
+            roles_str = ", ".join([r.mention for r in added])
+            await guild_log(
+                after.guild, "➕ Rôle(s) ajouté(s)",
+                f"Membre : {after.mention}\nRôle(s) : {roles_str}",
+            )
+        
+        if removed:
+            roles_str = ", ".join([r.mention for r in removed])
+            await guild_log(
+                after.guild, "➖ Rôle(s) retiré(s)",
+                f"Membre : {after.mention}\nRôle(s) : {roles_str}",
+            )
+    
+    if before.nick != after.nick:
+        before_nick = before.nick or "(aucun)"
+        after_nick = after.nick or "(aucun)"
+        await guild_log(
+            after.guild, "📝 Pseudo modifié",
+            f"Membre : {after.mention}\n"
+            f"**Avant :** {before_nick}\n"
+            f"**Après :** {after_nick}",
+        )
+
+
+@bot.event
+async def on_guild_channel_create(channel):
+    """Log la création de salons."""
+    if isinstance(channel, discord.TextChannel) or isinstance(channel, discord.VoiceChannel):
+        await guild_log(
+            channel.guild, "🆕 Salon créé",
+            f"Nom : {channel.mention if isinstance(channel, discord.TextChannel) else channel.name}\n"
+            f"Type : {'Textuel' if isinstance(channel, discord.TextChannel) else 'Vocal'}",
+        )
+
+
+@bot.event
+async def on_guild_channel_delete(channel):
+    """Log la suppression de salons."""
+    if isinstance(channel, discord.TextChannel) or isinstance(channel, discord.VoiceChannel):
+        await guild_log(
+            channel.guild, "🗑️ Salon supprimé",
+            f"Nom : {channel.name}\n"
+            f"Type : {'Textuel' if isinstance(channel, discord.TextChannel) else 'Vocal'}",
+        )
+
+
+@bot.event
+async def on_guild_channel_update(before, after):
+    """Log les modifications de salons."""
+    if before.name != after.name:
+        await guild_log(
+            after.guild, "✏️ Salon renommé",
+            f"**Avant :** {before.name}\n**Après :** {after.name}",
+        )
+
+
+@bot.event
+async def on_guild_role_create(role: discord.Role):
+    """Log la création de rôles."""
+    await guild_log(
+        role.guild, "🆕 Rôle créé",
+        f"Nom : {role.mention}\nCouleur : {role.color}",
+    )
+
+
+@bot.event
+async def on_guild_role_delete(role: discord.Role):
+    """Log la suppression de rôles."""
+    await guild_log(
+        role.guild, "🗑️ Rôle supprimé",
+        f"Nom : {role.name}\nCouleur : {role.color}",
+    )
+
+
+@bot.event
+async def on_guild_role_update(before: discord.Role, after: discord.Role):
+    """Log les modifications de rôles."""
+    changes = []
+    
+    if before.name != after.name:
+        changes.append(f"**Nom :** {before.name} → {after.name}")
+    
+    if before.color != after.color:
+        changes.append(f"**Couleur :** {before.color} → {after.color}")
+    
+    if before.permissions != after.permissions:
+        changes.append("**Permissions modifiées**")
+    
+    if changes:
+        await guild_log(
+            after.guild, "✏️ Rôle modifié",
+            f"Rôle : {after.mention}\n" + "\n".join(changes),
+        )
+
+
+@bot.event
+async def on_member_ban(guild: discord.Guild, user: discord.User):
+    """Log les bannissements."""
+    await guild_log(
+        guild, "🔨 Membre banni",
+        f"Utilisateur : {user.mention} ({user})",
+    )
+
+
+@bot.event
+async def on_member_unban(guild: discord.Guild, user: discord.User):
+    """Log les débannissements."""
+    await guild_log(
+        guild, "✅ Membre débanni",
+        f"Utilisateur : {user.mention} ({user})",
+    )
+
+
 AUTO_REPLIES = {
     "salut": ["salut à toi, quoi de neuf ?", "saluttt, tu vas bien ?", "yooo salut !"],
     "yo": ["yooo", "yo ça dit quoi ?", "yoo, bien ou bien ?"],

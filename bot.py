@@ -29,20 +29,37 @@ os.system("which ffmpeg")
 os.system("ffmpeg -version")
 
 # Debug : chercher libopus
-os.system("find /nix/store -name 'libopus.so*' 2>/dev/null | head -5")
-os.system("ldconfig -p | grep opus || echo 'ldconfig non disponible'")
+import subprocess
+_opus_find = subprocess.run(
+    ["find", "/nix/store", "-name", "libopus.so*", "-type", "f"],
+    capture_output=True, text=True, timeout=5
+)
+_opus_paths = [p for p in _opus_find.stdout.strip().split('\n') if p and 'libopus.so' in p]
+print(f"Chemins libopus trouvés : {_opus_paths[:3]}")
 
-# Chargement opus au démarrage
-for _opus_name in ("libopus.so.0", "libopus.so", "libopus", "opus"):
+# Chargement opus au démarrage avec chemin absolu
+_opus_loaded = False
+for _opus_path in _opus_paths[:3]:
     try:
-        discord.opus.load_opus(_opus_name)
-        print(f"Opus chargé : {_opus_name}")
+        discord.opus.load_opus(_opus_path)
+        print(f"✓ Opus chargé : {_opus_path}")
+        _opus_loaded = True
         break
     except Exception as e:
-        print(f"Échec {_opus_name}: {e}")
-        continue
-else:
-    print("AVERTISSEMENT : libopus introuvable, la musique ne fonctionnera pas")
+        print(f"✗ Échec {_opus_path}: {e}")
+
+if not _opus_loaded:
+    for _opus_name in ("libopus.so.0", "libopus.so", "libopus", "opus"):
+        try:
+            discord.opus.load_opus(_opus_name)
+            print(f"✓ Opus chargé : {_opus_name}")
+            _opus_loaded = True
+            break
+        except Exception as e:
+            print(f"✗ Échec {_opus_name}: {e}")
+
+if not _opus_loaded:
+    print("⚠ AVERTISSEMENT : libopus introuvable, la musique ne fonctionnera pas")
 
 # ---------------- LOGGING ---------------- #
 logging.basicConfig(

@@ -791,8 +791,8 @@ async def on_ready():
                 log.info("Opus chargé : libopus")
             except Exception as e:
                 log.error("Impossible de charger opus : %s", e)
-    # Ré-enregistre la view persistante des règlements (sans connaître les role_ids précis,
-    # Discord ré-appelle le callback sur n'importe quel button avec ce custom_id ; on ignore.)
+    # Ré-enregistre les views persistantes
+    bot.add_view(TicketSelectView())
 
 
 @bot.event
@@ -1137,6 +1137,8 @@ def get_help_embed(author: discord.Member) -> discord.Embed:
                 "**!setwelcome** → définit le salon de bienvenue courant\n"
                 "**!msg #salon message** → envoie un message dans un salon\n"
                 "**!rule #salon @role** → envoie le règlement et donne un rôle\n"
+                "**!ticket #salon** → envoie le système de tickets\n"
+                "**!closeticket** → ferme un ticket (dans le salon du ticket)\n"
                 "**!giveaway** → lance un giveaway interactif"
             ),
             inline=False,
@@ -1613,6 +1615,158 @@ async def rule(ctx):
         await ctx.send("Je n'ai pas la permission d'envoyer le règlement dans ce salon.")
         return
     await ctx.send(f"Règlement envoyé dans {channel.mention} avec le rôle {role.mention}.")
+
+
+@bot.command()
+@is_admin()
+async def ticket(ctx):
+    """Envoie un embed de création de tickets dans le salon mentionné."""
+    if not ctx.message.channel_mentions:
+        await ctx.send("Mentionne un salon, par exemple `!ticket #tickets`.")
+        return
+    
+    channel = ctx.message.channel_mentions[0]
+    
+    embed = discord.Embed(
+        title="🎫 Système de Tickets",
+        description=(
+            "⋆ 𐙚 ̊. Appuies ici pour créer un ticket .✦ ݁˖\n"
+            "જ⁀➴ Choisis la raison par laquelle tu souhaites créer un ticket ~"
+        ),
+        color=discord.Color.blue()
+    )
+    
+    try:
+        await channel.send(embed=embed, view=TicketSelectView())
+        await ctx.send(f"✅ Message de tickets envoyé dans {channel.mention}")
+    except discord.Forbidden:
+        await ctx.send("❌ Je n'ai pas la permission d'envoyer des messages dans ce salon.")
+
+
+class TicketSelectView(discord.ui.View):
+    """Menu de sélection pour créer un ticket."""
+    
+    def __init__(self):
+        super().__init__(timeout=None)  # Persistant
+        
+        options = [
+            discord.SelectOption(
+                label="Signaler un membre",
+                description="Un membre n'a pas respecté le règlement ? Fais le nous savoir !",
+                emoji="🌸",
+                value="report"
+            ),
+            discord.SelectOption(
+                label="Devenir membre du staff",
+                description="Tu souhaites nous aider à améliorer Kyoren et assurer son avenir ? Rejoins nous !",
+                emoji="🌸",
+                value="staff"
+            ),
+            discord.SelectOption(
+                label="Autre",
+                description="Une autre raison",
+                emoji="💬",
+                value="other"
+            ),
+        ]
+        
+        select = discord.ui.Select(
+            placeholder="Fais un choix",
+            options=options,
+            custom_id="ticket_select_persistent"
+        )
+        select.callback = self.select_callback
+        self.add_item(select)
+    
+    async def select_callback(self, interaction: discord.Interaction):
+        reason = interaction.data["values"][0]
+        
+        reason_labels = {
+            "report": "Signalement de membre",
+            "staff": "Candidature staff",
+            "other": "Autre"
+        }
+        
+        # Crée le salon de ticket
+        guild = interaction.guild
+        user = interaction.user
+        
+        # Nom du ticket
+        ticket_name = f"ticket-{user.name}-{user.discriminator}"
+        
+        # Vérifie si l'utilisateur a déjà un ticket ouvert
+        existing = discord.utils.get(guild.text_channels, name=ticket_name)
+        if existing:
+            await interaction.response.send_message(
+                f"❌ Tu as déjà un ticket ouvert : {existing.mention}",
+                ephemeral=True
+            )
+            return
+        
+        # Permissions du salon
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+        
+        # Ajoute les admins/modos
+        for role in guild.roles:
+            if role.permissions.administrator or role.permissions.manage_guild:
+                overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        
+        try:
+            ticket_channel = await guild.create_text_channel(
+                name=ticket_name,
+                overwrites=overwrites,
+                reason=f"Ticket créé par {user}"
+            )
+            
+            # Message d'accueil dans le ticket
+            welcome_embed = discord.Embed(
+                title=f"🎫 Ticket - {reason_labels[reason]}",
+                description=(
+                    f"Bienvenue {user.mention} !\n\n"
+                    f"**Raison :** {reason_labels[reason]}\n\n"
+                    f"Un membre du staff va te répondre sous peu.\n"
+                    f"Pour fermer ce ticket, un admin peut utiliser `!closeticket`."
+                ),
+                color=discord.Color.blue()
+            )
+            
+            await ticket_channel.send(content=user.mention, embed=welcome_embed)
+            
+            await interaction.response.send_message(
+                f"✅ Ticket créé : {ticket_channel.mention}",
+                ephemeral=True
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ Je n'ai pas la permission de créer des salons.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ Erreur lors de la création du ticket : {e}",
+                ephemeral=True
+            )
+
+
+@bot.command()
+@is_admin()
+async def closeticket(ctx):
+    """Ferme un salon de ticket."""
+    if not ctx.channel.name.startswith("ticket-"):
+        await ctx.send("❌ Cette commande ne peut être utilisée que dans un salon de ticket.")
+        return
+    
+    await ctx.send("🔒 Fermeture du ticket dans 5 secondes...")
+    await asyncio.sleep(5)
+    
+    try:
+        await ctx.channel.delete(reason=f"Ticket fermé par {ctx.author}")
+    except discord.Forbidden:
+        await ctx.send("❌ Je n'ai pas la permission de supprimer ce salon.")
 
 
 @bot.command()

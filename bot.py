@@ -17,6 +17,13 @@ try:
 except ImportError:
     yt_dlp = None
 
+# Charge les variables d'environnement depuis le fichier .env
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv n'est pas installé
+
 print("CWD =", os.getcwd())
 print("cookies.txt existe ?", os.path.exists("cookies.txt"))
 print("cookies.txt chemin absolu =", os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"))
@@ -101,6 +108,8 @@ def _default_guild_data():
         "protected_users": [],
         # elevated_users : [uid1, uid2, ...] - membres protégés en mode "up" (bypass hiérarchie)
         "elevated_users": [],
+        # stats_channels : {type: channel_id} - salons de statistiques
+        "stats_channels": {},
     }
 
 
@@ -337,7 +346,7 @@ async def add_warn(guild: discord.Guild, moderator: discord.Member,
         log.error("Erreur escalade warns : %s", exc)
 
 
-# ---------------- RULES VIEW ---------------- #
+# ---------------- MODERATION UI ---------------- #
 
 MODERATION_REASON_OPTIONS = [
     ("Propos raciste", "⛔"),
@@ -350,51 +359,6 @@ MODERATION_REASON_OPTIONS = [
     ("Contournement de sanction", "🔁"),
     ("Autre...", "✏️"),
 ]
-
-
-class RulesView(discord.ui.View):
-    def __init__(self, role_id: int):
-        super().__init__(timeout=None)
-        self.role_id = role_id
-
-    @discord.ui.button(label="Accepter le règlement",
-                       style=discord.ButtonStyle.success,
-                       custom_id="accept_rules_button")
-    async def accept_rules(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "Cette action doit être utilisée dans le serveur.", ephemeral=True)
-            return
-        role = interaction.guild.get_role(self.role_id)
-        if role is None:
-            await interaction.response.send_message(
-                "Le rôle associé au règlement est introuvable.", ephemeral=True)
-            return
-        member = interaction.guild.get_member(interaction.user.id)
-        if member is None:
-            await interaction.response.send_message(
-                "Impossible de te retrouver sur le serveur.", ephemeral=True)
-            return
-        if role in member.roles:
-            await interaction.response.send_message(
-                f"Tu as déjà le rôle {role.mention}.", ephemeral=True)
-            return
-        try:
-            await member.add_roles(role, reason="Règlement accepté")
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                "Je n'ai pas la permission de te donner ce rôle.", ephemeral=True)
-            return
-        except Exception as exc:
-            await interaction.response.send_message(
-                f"Erreur lors de l'attribution du rôle : {exc}", ephemeral=True)
-            return
-        await interaction.response.send_message(
-            f"Merci, tu as bien accepté le règlement. Tu as reçu le rôle {role.mention}.",
-            ephemeral=True)
-
-
-# ---------------- MODERATION UI ---------------- #
 
 async def execute_moderation_action(guild, moderator, target_member, action_name,
                                     reason, duration=None):
@@ -826,11 +790,16 @@ async def on_member_join(member: discord.Member):
         await ch.send(f"Bienvenue {member.mention}, tu es le {count}ᵉ membre !")
     except Exception as exc:
         log.warning("Impossible d'envoyer le message de bienvenue : %s", exc)
+    
+    # Met à jour les statistiques
+    await update_stats_channels(guild)
 
 
 @bot.event
 async def on_member_remove(member: discord.Member):
     await guild_log(member.guild, "👋 Leave", f"{member}")
+    # Met à jour les statistiques
+    await update_stats_channels(member.guild)
 
 
 @bot.event
@@ -874,6 +843,10 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
     """Log les changements de rôles et de pseudo."""
+    # Met à jour les stats si le statut change (en ligne/hors ligne)
+    if before.status != after.status:
+        await update_stats_channels(after.guild)
+    
     if before.roles != after.roles:
         added = [r for r in after.roles if r not in before.roles]
         removed = [r for r in before.roles if r not in after.roles]
@@ -912,6 +885,8 @@ async def on_guild_channel_create(channel):
             f"Nom : {channel.mention if isinstance(channel, discord.TextChannel) else channel.name}\n"
             f"Type : {'Textuel' if isinstance(channel, discord.TextChannel) else 'Vocal'}",
         )
+        # Met à jour les statistiques
+        await update_stats_channels(channel.guild)
 
 
 @bot.event
@@ -923,6 +898,8 @@ async def on_guild_channel_delete(channel):
             f"Nom : {channel.name}\n"
             f"Type : {'Textuel' if isinstance(channel, discord.TextChannel) else 'Vocal'}",
         )
+        # Met à jour les statistiques
+        await update_stats_channels(channel.guild)
 
 
 @bot.event
@@ -1301,7 +1278,8 @@ def get_help_embed(author: discord.Member) -> discord.Embed:
                 "**!setlogs** → définit le salon logs courant\n"
                 "**!setwelcome** → définit le salon de bienvenue courant\n"
                 "**!msg #salon message** → envoie un message dans un salon\n"
-                "**!rule #salon @role** → envoie le règlement et donne un rôle\n"
+                "**!rule** → affiche le règlement du serveur\n"
+                "**!stats** → configure les statistiques du serveur\n"
                 "**!ticket #salon** → envoie le système de tickets\n"
                 "**!closeticket** → ferme un ticket (dans le salon du ticket)\n"
                 "**!giveaway** → lance un giveaway interactif"
@@ -1869,11 +1847,6 @@ async def msg(ctx, *, content: str):
 @bot.command()
 @is_admin()
 async def rule(ctx):
-    if not ctx.message.channel_mentions or not ctx.message.role_mentions:
-        await ctx.send("Mentionne un salon et un rôle, par exemple `!rule #reglement @Membre`.")
-        return
-    channel = ctx.message.channel_mentions[0]
-    role = ctx.message.role_mentions[0]
     embed = discord.Embed(
         title="Règlement de Kyoren 🎐",
         description=(
@@ -1889,18 +1862,437 @@ async def rule(ctx):
             "**Contenu**\n"
             "Les contenus NSFW, violents, choquants ou illégaux sont interdits. Évitez les débats "
             "conflictuels (politique, religion...).\n\n"
-            "Pour accéder à l'intégralité du serveur, merci de lire le règlement puis d'accepter "
-            "en cliquant sur le bouton ci-dessous."
+            "Merci de respecter ce règlement pour maintenir une bonne ambiance sur le serveur."
         ),
         color=PINK,
     )
-    embed.add_field(name="Rôle donné", value=role.mention, inline=False)
-    try:
-        await channel.send(embed=embed, view=RulesView(role.id))
-    except discord.Forbidden:
-        await ctx.send("Je n'ai pas la permission d'envoyer le règlement dans ce salon.")
-        return
-    await ctx.send(f"Règlement envoyé dans {channel.mention} avec le rôle {role.mention}.")
+    await ctx.send(embed=embed)
+
+
+
+
+# ==================================================================== #
+#                       SYSTÈME DE STATISTIQUES                        #
+# ==================================================================== #
+
+STATS_OPTIONS = {
+    "members": {"label": "Nombre de membres", "emoji": "🍡"},
+    "text_channels": {"label": "Nombre de salons textuels", "emoji": "💬"},
+    "voice_channels": {"label": "Nombre de salons vocaux", "emoji": "🎧"},
+    "invite": {"label": "Invitation", "emoji": "📌"},
+    "online": {"label": "Nombre de personnes en ligne", "emoji": "🟢"},
+    "in_voice": {"label": "Nombre de personnes en salon vocal", "emoji": "🎭"},
+}
+
+
+async def update_stats_channels(guild: discord.Guild):
+    """Met à jour tous les salons de statistiques d'un serveur."""
+    gd = gdata(guild.id)
+    stats_channels = gd.get("stats_channels", {})
+    
+    for stat_type, channel_id in stats_channels.items():
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            continue
+        
+        try:
+            if stat_type == "members":
+                new_name = f"🍡Membres: {guild.member_count}"
+            elif stat_type == "text_channels":
+                new_name = f"💬Salons textuels: {len(guild.text_channels)}"
+            elif stat_type == "voice_channels":
+                new_name = f"🎧Salons vocaux: {len(guild.voice_channels)}"
+            elif stat_type == "invite":
+                new_name = "📌.gg/tEJNJnKpWU"
+            elif stat_type == "online":
+                online_count = sum(1 for m in guild.members if m.status != discord.Status.offline)
+                new_name = f"🟢Membres en ligne: {online_count}"
+            elif stat_type == "in_voice":
+                in_voice = sum(1 for m in guild.members if m.voice is not None)
+                new_name = f"🎭Membres en vocal: {in_voice}"
+            else:
+                continue
+            
+            if channel.name != new_name:
+                await channel.edit(name=new_name)
+        except Exception as exc:
+            log.warning(f"Erreur lors de la mise à jour du salon de stats {stat_type}: {exc}")
+
+
+class StatsConfirmView(discord.ui.View):
+    """Vue de confirmation initiale pour les statistiques."""
+    
+    def __init__(self, author: discord.Member):
+        super().__init__(timeout=60)
+        self.author = author
+        self.message = None
+        
+        options = [
+            discord.SelectOption(label="Oui", value="yes", emoji="✅"),
+            discord.SelectOption(label="Non", value="no", emoji="❌"),
+        ]
+        
+        select = discord.ui.Select(
+            placeholder="Faites votre choix",
+            options=options,
+            custom_id="stats_confirm"
+        )
+        select.callback = self.select_callback
+        self.add_item(select)
+    
+    async def select_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message(
+                "Seul l'auteur de la commande peut utiliser ce menu.",
+                ephemeral=True
+            )
+            return
+        
+        choice = interaction.data["values"][0]
+        
+        if choice == "no":
+            await interaction.response.edit_message(
+                embed=embed_ok("❌ Annulé", "Configuration des statistiques annulée."),
+                view=None
+            )
+            self.stop()
+        else:
+            # Passe à la sélection des statistiques
+            view = StatsSelectionView(self.author)
+            embed = discord.Embed(
+                title="📊 Configuration des statistiques",
+                description="Quelles statistiques voulez-vous afficher ?",
+                color=PINK
+            )
+            await interaction.response.edit_message(embed=embed, view=view)
+            view.message = await interaction.original_response()
+            self.stop()
+
+
+class StatsSelectionView(discord.ui.View):
+    """Vue de sélection des statistiques à afficher."""
+    
+    def __init__(self, author: discord.Member):
+        super().__init__(timeout=120)
+        self.author = author
+        self.message = None
+        self.selected_stats = []
+        
+        options = [
+            discord.SelectOption(
+                label=STATS_OPTIONS[key]["label"],
+                value=key,
+                emoji=STATS_OPTIONS[key]["emoji"]
+            )
+            for key in STATS_OPTIONS
+        ]
+        options.append(
+            discord.SelectOption(
+                label="✅ Étape suivante",
+                value="next",
+                emoji="✅"
+            )
+        )
+        
+        select = discord.ui.Select(
+            placeholder="Choisissez les statistiques",
+            options=options,
+            custom_id="stats_selection"
+        )
+        select.callback = self.select_callback
+        self.add_item(select)
+    
+    async def select_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message(
+                "Seul l'auteur de la commande peut utiliser ce menu.",
+                ephemeral=True
+            )
+            return
+        
+        choice = interaction.data["values"][0]
+        
+        if choice == "next":
+            if not self.selected_stats:
+                await interaction.response.send_message(
+                    "Vous devez sélectionner au moins une statistique !",
+                    ephemeral=True
+                )
+                return
+            
+            # Passe à la confirmation de retrait
+            view = StatsRemoveConfirmView(self.author, self.selected_stats)
+            embed = discord.Embed(
+                title="📊 Configuration des statistiques",
+                description="Voulez-vous retirer une statistique ?",
+                color=PINK
+            )
+            await interaction.response.edit_message(embed=embed, view=view)
+            view.message = await interaction.original_response()
+            self.stop()
+        else:
+            # Ajoute la statistique sélectionnée
+            if choice not in self.selected_stats:
+                self.selected_stats.append(choice)
+            
+            # Met à jour l'embed pour montrer les sélections
+            desc_lines = ["Quelles statistiques voulez-vous afficher ?\n"]
+            for stat in self.selected_stats:
+                desc_lines.append(f"✅ {STATS_OPTIONS[stat]['emoji']} {STATS_OPTIONS[stat]['label']}")
+            
+            embed = discord.Embed(
+                title="📊 Configuration des statistiques",
+                description="\n".join(desc_lines),
+                color=PINK
+            )
+            
+            await interaction.response.edit_message(embed=embed, view=self)
+
+
+class StatsRemoveConfirmView(discord.ui.View):
+    """Vue de confirmation pour retirer des statistiques."""
+    
+    def __init__(self, author: discord.Member, selected_stats: list):
+        super().__init__(timeout=60)
+        self.author = author
+        self.selected_stats = selected_stats
+        self.message = None
+        
+        options = [
+            discord.SelectOption(label="Oui", value="yes", emoji="✅"),
+            discord.SelectOption(label="Non", value="no", emoji="❌"),
+        ]
+        
+        select = discord.ui.Select(
+            placeholder="Faites votre choix",
+            options=options,
+            custom_id="stats_remove_confirm"
+        )
+        select.callback = self.select_callback
+        self.add_item(select)
+    
+    async def select_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message(
+                "Seul l'auteur de la commande peut utiliser ce menu.",
+                ephemeral=True
+            )
+            return
+        
+        choice = interaction.data["values"][0]
+        
+        if choice == "no":
+            # Crée les salons de statistiques
+            await self.create_stats_channels(interaction)
+            self.stop()
+        else:
+            # Passe à la sélection des statistiques à retirer
+            view = StatsRemoveSelectionView(self.author, self.selected_stats)
+            embed = discord.Embed(
+                title="📊 Configuration des statistiques",
+                description="Choisissez la statistique à retirer",
+                color=PINK
+            )
+            await interaction.response.edit_message(embed=embed, view=view)
+            view.message = await interaction.original_response()
+            self.stop()
+    
+    async def create_stats_channels(self, interaction: discord.Interaction):
+        """Crée les salons de statistiques."""
+        guild = interaction.guild
+        gd = gdata(guild.id)
+        
+        # Permissions : visible par tous, mais personne ne peut écrire/rejoindre
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(
+                view_channel=True,
+                connect=False,
+                send_messages=False,
+                read_messages=True
+            ),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True,
+                manage_channels=True
+            )
+        }
+        
+        # Ajoute les permissions pour les admins
+        for role in guild.roles:
+            if role.permissions.administrator:
+                overwrites[role] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    connect=True,
+                    send_messages=True,
+                    read_messages=True
+                )
+        
+        stats_channels = {}
+        
+        try:
+            for stat_type in self.selected_stats:
+                # Détermine le nom initial du salon
+                if stat_type == "members":
+                    name = f"🍡Membres: {guild.member_count}"
+                elif stat_type == "text_channels":
+                    name = f"💬Salons textuels: {len(guild.text_channels)}"
+                elif stat_type == "voice_channels":
+                    name = f"🎧Salons vocaux: {len(guild.voice_channels)}"
+                elif stat_type == "invite":
+                    name = "📌.gg/tEJNJnKpWU"
+                elif stat_type == "online":
+                    online_count = sum(1 for m in guild.members if m.status != discord.Status.offline)
+                    name = f"🟢Membres en ligne: {online_count}"
+                elif stat_type == "in_voice":
+                    in_voice = sum(1 for m in guild.members if m.voice is not None)
+                    name = f"🎭Membres en vocal: {in_voice}"
+                else:
+                    continue
+                
+                # Crée le salon vocal (pour qu'il soit visible mais non accessible)
+                channel = await guild.create_voice_channel(
+                    name=name,
+                    overwrites=overwrites,
+                    position=0,
+                    reason=f"Salon de statistiques créé par {self.author}"
+                )
+                
+                stats_channels[stat_type] = channel.id
+            
+            # Sauvegarde dans les données
+            gd["stats_channels"] = stats_channels
+            await save_data()
+            
+            await interaction.response.edit_message(
+                embed=embed_ok(
+                    "✅ Statistiques configurées",
+                    f"{len(stats_channels)} salon(s) de statistiques créé(s) avec succès !"
+                ),
+                view=None
+            )
+        except discord.Forbidden:
+            await interaction.response.edit_message(
+                embed=embed_err(
+                    "❌ Erreur",
+                    "Je n'ai pas la permission de créer des salons."
+                ),
+                view=None
+            )
+        except Exception as exc:
+            await interaction.response.edit_message(
+                embed=embed_err(
+                    "❌ Erreur",
+                    f"Une erreur est survenue : {exc}"
+                ),
+                view=None
+            )
+
+
+class StatsRemoveSelectionView(discord.ui.View):
+    """Vue de sélection des statistiques à retirer."""
+    
+    def __init__(self, author: discord.Member, selected_stats: list):
+        super().__init__(timeout=120)
+        self.author = author
+        self.selected_stats = selected_stats.copy()
+        self.removed_stats = []
+        self.message = None
+        
+        self.update_select()
+    
+    def update_select(self):
+        """Met à jour le menu de sélection."""
+        self.clear_items()
+        
+        options = [
+            discord.SelectOption(
+                label=STATS_OPTIONS[key]["label"],
+                value=key,
+                emoji=STATS_OPTIONS[key]["emoji"]
+            )
+            for key in self.selected_stats
+        ]
+        
+        if options:
+            options.append(
+                discord.SelectOption(
+                    label="✅ Étape suivante",
+                    value="next",
+                    emoji="✅"
+                )
+            )
+            
+            select = discord.ui.Select(
+                placeholder="Choisissez la statistique à retirer",
+                options=options,
+                custom_id="stats_remove_selection"
+            )
+            select.callback = self.select_callback
+            self.add_item(select)
+    
+    async def select_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message(
+                "Seul l'auteur de la commande peut utiliser ce menu.",
+                ephemeral=True
+            )
+            return
+        
+        choice = interaction.data["values"][0]
+        
+        if choice == "next":
+            # Retourne à la confirmation de retrait
+            view = StatsRemoveConfirmView(self.author, self.selected_stats)
+            
+            desc_lines = ["Voulez-vous retirer une statistique ?\n\n**Statistiques sélectionnées :**"]
+            for stat in self.selected_stats:
+                desc_lines.append(f"✅ {STATS_OPTIONS[stat]['emoji']} {STATS_OPTIONS[stat]['label']}")
+            if self.removed_stats:
+                desc_lines.append("\n**Statistiques retirées :**")
+                for stat in self.removed_stats:
+                    desc_lines.append(f"❌ {STATS_OPTIONS[stat]['emoji']} {STATS_OPTIONS[stat]['label']}")
+            
+            embed = discord.Embed(
+                title="📊 Configuration des statistiques",
+                description="\n".join(desc_lines),
+                color=PINK
+            )
+            await interaction.response.edit_message(embed=embed, view=view)
+            view.message = await interaction.original_response()
+            self.stop()
+        else:
+            # Retire la statistique sélectionnée
+            if choice in self.selected_stats:
+                self.selected_stats.remove(choice)
+                self.removed_stats.append(choice)
+            
+            # Met à jour l'embed et le menu
+            desc_lines = ["Choisissez la statistique à retirer\n"]
+            if self.removed_stats:
+                for stat in self.removed_stats:
+                    desc_lines.append(f"❌ {STATS_OPTIONS[stat]['emoji']} {STATS_OPTIONS[stat]['label']}")
+            
+            embed = discord.Embed(
+                title="📊 Configuration des statistiques",
+                description="\n".join(desc_lines),
+                color=PINK
+            )
+            
+            self.update_select()
+            await interaction.response.edit_message(embed=embed, view=self)
+
+
+@bot.command()
+@is_admin()
+async def stats(ctx):
+    """Configure les statistiques du serveur."""
+    embed = discord.Embed(
+        title="📊 Configuration des statistiques",
+        description="Voulez-vous afficher les statistiques du serveur ?",
+        color=PINK
+    )
+    
+    view = StatsConfirmView(ctx.author)
+    view.message = await ctx.send(embed=embed, view=view)
 
 
 @bot.command()
@@ -2410,7 +2802,12 @@ async def remove(ctx, position: int):
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    """Déconnecte le bot si le salon vocal devient vide."""
+    """Déconnecte le bot si le salon vocal devient vide et met à jour les stats."""
+    # Met à jour les statistiques si quelqu'un rejoint/quitte un vocal
+    if (before.channel is None and after.channel is not None) or \
+       (before.channel is not None and after.channel is None):
+        await update_stats_channels(member.guild)
+    
     if member.bot:
         return
     state = _music_state.get(member.guild.id)

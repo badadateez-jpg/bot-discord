@@ -2484,7 +2484,16 @@ class VerifChannelSelectView(discord.ui.View):
             )
             return
         
-        self.selected_channel = select.values[0]
+        # Récupère le vrai objet TextChannel depuis l'ID
+        channel_id = select.values[0].id
+        self.selected_channel = interaction.guild.get_channel(channel_id)
+        
+        if self.selected_channel is None:
+            await interaction.response.send_message(
+                "❌ Impossible de trouver ce salon.",
+                ephemeral=True
+            )
+            return
         
         # Passe à la sélection du rôle
         view = VerifRoleSelectView(self.author, self.selected_channel)

@@ -110,6 +110,8 @@ def _default_guild_data():
         "elevated_users": [],
         # stats_channels : {type: channel_id} - salons de statistiques
         "stats_channels": {},
+        # verification : {channel_id, role_id, message_id} - système de vérification
+        "verification": {},
     }
 
 
@@ -771,8 +773,15 @@ async def on_ready():
                 log.info("Opus chargé : libopus")
             except Exception as e:
                 log.error("Impossible de charger opus : %s", e)
+    
     # Ré-enregistre les views persistantes
     bot.add_view(TicketSelectView())
+    
+    # Ré-enregistre les vues de vérification pour chaque serveur
+    for guild_id_str, guild_data in data.get("guilds", {}).items():
+        verif_config = guild_data.get("verification", {})
+        if verif_config.get("role_id"):
+            bot.add_view(VerificationView(verif_config["role_id"]))
 
 
 @bot.event
@@ -1280,6 +1289,7 @@ def get_help_embed(author: discord.Member) -> discord.Embed:
                 "**!msg #salon message** → envoie un message dans un salon\n"
                 "**!rule** → affiche le règlement du serveur\n"
                 "**!stats** → configure les statistiques du serveur\n"
+                "**!verif** → configure le système de vérification\n"
                 "**!ticket #salon** → envoie le système de tickets\n"
                 "**!closeticket** → ferme un ticket (dans le salon du ticket)\n"
                 "**!giveaway** → lance un giveaway interactif"
@@ -2373,6 +2383,217 @@ async def stats(ctx):
     )
     
     view = StatsConfirmView(ctx.author)
+    view.message = await ctx.send(embed=embed, view=view)
+
+
+
+
+# ==================================================================== #
+#                    SYSTÈME DE VÉRIFICATION                           #
+# ==================================================================== #
+
+class VerificationView(discord.ui.View):
+    """Vue persistante pour le bouton de vérification."""
+    
+    def __init__(self, role_id: int):
+        super().__init__(timeout=None)
+        self.role_id = role_id
+    
+    @discord.ui.button(
+        label="✅ Je ne suis pas un robot",
+        style=discord.ButtonStyle.success,
+        custom_id="verification_button_persistent"
+    )
+    async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "Cette action doit être utilisée dans le serveur.",
+                ephemeral=True
+            )
+            return
+        
+        role = interaction.guild.get_role(self.role_id)
+        if role is None:
+            await interaction.response.send_message(
+                "❌ Le rôle de vérification est introuvable.",
+                ephemeral=True
+            )
+            return
+        
+        member = interaction.guild.get_member(interaction.user.id)
+        if member is None:
+            await interaction.response.send_message(
+                "❌ Impossible de te retrouver sur le serveur.",
+                ephemeral=True
+            )
+            return
+        
+        if role in member.roles:
+            await interaction.response.send_message(
+                f"✅ Tu es déjà vérifié(e) avec le rôle {role.mention}.",
+                ephemeral=True
+            )
+            return
+        
+        try:
+            await member.add_roles(role, reason="Vérification réussie")
+            await interaction.response.send_message(
+                f"✅ Vérification réussie ! Tu as reçu le rôle {role.mention}.",
+                ephemeral=True
+            )
+            
+            # Log dans le salon de logs
+            await guild_log(
+                interaction.guild,
+                "✅ Vérification",
+                f"{member.mention} s'est vérifié(e) et a reçu le rôle {role.mention}."
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ Je n'ai pas la permission de te donner ce rôle.",
+                ephemeral=True
+            )
+        except Exception as exc:
+            await interaction.response.send_message(
+                f"❌ Erreur lors de la vérification : {exc}",
+                ephemeral=True
+            )
+
+
+class VerifChannelSelectView(discord.ui.View):
+    """Vue pour sélectionner le salon de vérification."""
+    
+    def __init__(self, author: discord.Member):
+        super().__init__(timeout=120)
+        self.author = author
+        self.selected_channel = None
+        self.message = None
+    
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        placeholder="Sélectionnez le salon de vérification",
+        channel_types=[discord.ChannelType.text],
+        min_values=1,
+        max_values=1
+    )
+    async def channel_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message(
+                "Seul l'auteur de la commande peut utiliser ce menu.",
+                ephemeral=True
+            )
+            return
+        
+        self.selected_channel = select.values[0]
+        
+        # Passe à la sélection du rôle
+        view = VerifRoleSelectView(self.author, self.selected_channel)
+        embed = discord.Embed(
+            title="🔐 Configuration de la vérification",
+            description=f"Salon sélectionné : {self.selected_channel.mention}\n\nMaintenant, sélectionnez le rôle à donner après vérification :",
+            color=PINK
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
+        view.message = await interaction.original_response()
+        self.stop()
+
+
+class VerifRoleSelectView(discord.ui.View):
+    """Vue pour sélectionner le rôle de vérification."""
+    
+    def __init__(self, author: discord.Member, channel: discord.TextChannel):
+        super().__init__(timeout=120)
+        self.author = author
+        self.channel = channel
+        self.selected_role = None
+        self.message = None
+    
+    @discord.ui.select(
+        cls=discord.ui.RoleSelect,
+        placeholder="Sélectionnez le rôle à donner",
+        min_values=1,
+        max_values=1
+    )
+    async def role_select(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message(
+                "Seul l'auteur de la commande peut utiliser ce menu.",
+                ephemeral=True
+            )
+            return
+        
+        self.selected_role = select.values[0]
+        
+        # Crée le message de vérification
+        await self.create_verification_message(interaction)
+        self.stop()
+    
+    async def create_verification_message(self, interaction: discord.Interaction):
+        """Crée le message de vérification dans le salon sélectionné."""
+        guild = interaction.guild
+        gd = gdata(guild.id)
+        
+        embed = discord.Embed(
+            title="🔐 Vérification",
+            description=(
+                "Bienvenue sur le serveur !\n\n"
+                "Pour accéder au serveur, clique sur le bouton ci-dessous pour te vérifier.\n\n"
+                "Tu recevras automatiquement l'accès complet au serveur."
+            ),
+            color=discord.Color.green()
+        )
+        embed.set_footer(text="Clique sur le bouton pour te vérifier")
+        
+        try:
+            # Envoie le message de vérification
+            view = VerificationView(self.selected_role.id)
+            verif_message = await self.channel.send(embed=embed, view=view)
+            
+            # Sauvegarde la configuration
+            gd["verification"] = {
+                "channel_id": self.channel.id,
+                "role_id": self.selected_role.id,
+                "message_id": verif_message.id
+            }
+            await save_data()
+            
+            await interaction.response.edit_message(
+                embed=embed_ok(
+                    "✅ Vérification configurée",
+                    f"Le système de vérification a été créé dans {self.channel.mention}\n"
+                    f"Rôle à donner : {self.selected_role.mention}"
+                ),
+                view=None
+            )
+        except discord.Forbidden:
+            await interaction.response.edit_message(
+                embed=embed_err(
+                    "❌ Erreur",
+                    f"Je n'ai pas la permission d'envoyer des messages dans {self.channel.mention}"
+                ),
+                view=None
+            )
+        except Exception as exc:
+            await interaction.response.edit_message(
+                embed=embed_err(
+                    "❌ Erreur",
+                    f"Une erreur est survenue : {exc}"
+                ),
+                view=None
+            )
+
+
+@bot.command()
+@is_admin()
+async def verif(ctx):
+    """Configure le système de vérification."""
+    embed = discord.Embed(
+        title="🔐 Configuration de la vérification",
+        description="Sélectionnez le salon où envoyer le message de vérification :",
+        color=PINK
+    )
+    
+    view = VerifChannelSelectView(ctx.author)
     view.message = await ctx.send(embed=embed, view=view)
 
 

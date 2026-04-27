@@ -1951,10 +1951,15 @@ class StatsConfirmView(discord.ui.View):
         choice = interaction.data["values"][0]
         
         if choice == "no":
-            await interaction.response.edit_message(
-                embed=embed_ok("❌ Annulé", "Configuration des statistiques annulée."),
-                view=None
+            # Demande si on veut supprimer les statistiques existantes
+            view = StatsDeleteConfirmView(self.author)
+            embed = discord.Embed(
+                title="📊 Configuration des statistiques",
+                description="Voulez-vous supprimer les précédentes statistiques ?",
+                color=PINK
             )
+            await interaction.response.edit_message(embed=embed, view=view)
+            view.message = await interaction.original_response()
             self.stop()
         else:
             # Passe à la sélection des statistiques
@@ -1966,6 +1971,82 @@ class StatsConfirmView(discord.ui.View):
             )
             await interaction.response.edit_message(embed=embed, view=view)
             view.message = await interaction.original_response()
+            self.stop()
+
+
+class StatsDeleteConfirmView(discord.ui.View):
+    """Vue de confirmation pour supprimer les statistiques existantes."""
+    
+    def __init__(self, author: discord.Member):
+        super().__init__(timeout=60)
+        self.author = author
+        self.message = None
+        
+        options = [
+            discord.SelectOption(label="Oui", value="yes", emoji="✅"),
+            discord.SelectOption(label="Non", value="no", emoji="❌"),
+        ]
+        
+        select = discord.ui.Select(
+            placeholder="Faites votre choix",
+            options=options,
+            custom_id="stats_delete_confirm"
+        )
+        select.callback = self.select_callback
+        self.add_item(select)
+    
+    async def select_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message(
+                "Seul l'auteur de la commande peut utiliser ce menu.",
+                ephemeral=True
+            )
+            return
+        
+        choice = interaction.data["values"][0]
+        
+        if choice == "no":
+            # Annule la commande
+            await interaction.response.edit_message(
+                embed=embed_ok("❌ Annulé", "Configuration des statistiques annulée."),
+                view=None
+            )
+            self.stop()
+        else:
+            # Supprime les salons de statistiques existants
+            guild = interaction.guild
+            gd = gdata(guild.id)
+            stats_channels = gd.get("stats_channels", {})
+            
+            if not stats_channels:
+                await interaction.response.edit_message(
+                    embed=embed_ok("ℹ️ Information", "Aucune statistique à supprimer."),
+                    view=None
+                )
+                self.stop()
+                return
+            
+            deleted_count = 0
+            for stat_type, channel_id in list(stats_channels.items()):
+                channel = guild.get_channel(channel_id)
+                if channel:
+                    try:
+                        await channel.delete(reason=f"Suppression des statistiques par {self.author}")
+                        deleted_count += 1
+                    except Exception as exc:
+                        log.warning(f"Impossible de supprimer le salon de stats {stat_type}: {exc}")
+            
+            # Vide les statistiques dans les données
+            gd["stats_channels"] = {}
+            await save_data()
+            
+            await interaction.response.edit_message(
+                embed=embed_ok(
+                    "✅ Statistiques supprimées",
+                    f"{deleted_count} salon(s) de statistiques supprimé(s)."
+                ),
+                view=None
+            )
             self.stop()
 
 
